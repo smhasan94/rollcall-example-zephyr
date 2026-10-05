@@ -69,7 +69,6 @@ The branch `demo/mbedtls` adds Mbed TLS to the application (`CONFIG_MBEDTLS=y`, 
 crypto core and an entropy source, which Zephyr v4.4.2 needs to compile it). Once a pull
 request from it is open, the Action's comment there will show what the change adds (the
 `mbedtls-integration` subsystem of `zephyr`), any new vulnerabilities, and the gate's verdict.
-The demo pull request: (link added when opened).
 
 ## Licence
 
