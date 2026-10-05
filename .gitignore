@@ -1,0 +1,3 @@
+# Build output (scripts/build.sh) and the Action's output directory.
+/build/
+/.rollcall-action/

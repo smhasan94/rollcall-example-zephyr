@@ -1,0 +1,28 @@
+# The west workspace (a T2 "manifest repository" layout): this repository and Zephyr v4.4.2,
+# with only the modules the nRF52840 DK sysbuild + MCUboot build needs. The pins are the ones
+# rollcall's own Zephyr fixtures are built with (rollcall's scripts/regen-fixtures.sh).
+#
+#   mkdir example-ws && cd example-ws
+#   git clone https://github.com/smhasan94/rollcall-example-zephyr
+#   rollcall-example-zephyr/scripts/setup-sdk.sh
+manifest:
+  version: "1.2"
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      # The tag, so the build (and west spdx) names the release; scripts/setup-sdk.sh checks
+      # that it is still commit dccb09599635bdff17633fa7e9dab014b91dce90.
+      revision: v4.4.2
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_nordic
+          - mbedtls
+          - mcuboot
+          - tf-psa-crypto
+  self:
+    path: rollcall-example-zephyr

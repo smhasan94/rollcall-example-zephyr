@@ -1,0 +1,110 @@
+# Build the firmware (Zephyr v4.4.2, nRF52840 DK, sysbuild: the application and MCUboot), then
+# run rollcall on it with the rollcall Action: CycloneDX 1.6 SBOM, validation, grype scan, VEX,
+# readiness report; on a pull request, a comment comparing it with main and a gate on new
+# high or critical findings.
+#
+# - sbom: on every push and pull request.
+# - badge: on pushes to main only, writes the readiness score to the orphan `badges` branch
+#   (rollcall.json there), which the README's shields.io endpoint badge reads. It is the only
+#   job with write access, and never runs for pull requests.
+#
+# The Action is used at @main with rollcall built from source until rollcall v0.1.0 is
+# released; then switch to `@v0.1.0` and `rollcall-version: v0.1.0` (the release binary,
+# checked against its SHA256SUMS). Other actions are pinned to full commit SHAs.
+name: rollcall
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  sbom:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read        # check out the repository
+      pull-requests: write  # post and update the comment
+      actions: read         # download main's artifact, the diff's base
+    outputs:
+      score: ${{ steps.rollcall.outputs.score }}
+    steps:
+      # The workspace is a T2 west workspace: this repository is checked out one level down,
+      # and Zephyr and its modules go beside it.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: rollcall-example-zephyr
+          persist-credentials: false
+      - name: Build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ninja-build
+      # The SDK and the west workspace's modules, keyed on everything that pins them.
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            .zephyr-sdk-1.0.1
+            .west
+            zephyr
+            modules
+            bootloader
+          key: zephyr-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rollcall-example-zephyr/west.yml', 'rollcall-example-zephyr/requirements.txt', 'rollcall-example-zephyr/scripts/setup-sdk.sh') }}
+      - name: Set up the west workspace and the Zephyr SDK
+        run: rollcall-example-zephyr/scripts/setup-sdk.sh
+      - name: Build (sysbuild, MCUboot) and prepare for rollcall
+        run: rollcall-example-zephyr/scripts/build.sh
+      - name: rollcall
+        id: rollcall
+        uses: smhasan94/rollcall/action@main
+        with:
+          build-dir: rollcall-example-zephyr/build
+          rollcall-version: source
+          fail-on: high
+          artifact-name: rollcall
+      - name: Summary
+        env:
+          SCORE: ${{ steps.rollcall.outputs.score }}
+          GATE: ${{ steps.rollcall.outputs.gate }}
+        run: |
+          echo "readiness score: $SCORE/100, gate: $GATE"
+          [[ "$SCORE" =~ ^[0-9]+$ ]] || { echo "::error::no readiness score from the Action"; exit 1; }
+
+  badge:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: sbom
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # push the badges branch
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: repo
+      - name: Write the badge JSON to the badges branch
+        env:
+          SCORE: ${{ needs.sbom.outputs.score }}
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/badges"
+          mkdir -p "$out"
+          repo/scripts/badge.sh "$SCORE" "$out/rollcall.json"
+          # A fresh repository holding only the badge: one commit, replacing the branch on
+          # every run, so `badges` never carries history or the sources.
+          mkdir "$out/branch"
+          cd "$out/branch"
+          git init -q -b badges
+          cp "$out/rollcall.json" rollcall.json
+          git add rollcall.json
+          git -c user.name="github-actions[bot]" \
+            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "Readiness badge: $SCORE/100 (${GITHUB_SHA::12})"
+          # The checkout's credentials, for this repository only.
+          auth="$(git -C "$GITHUB_WORKSPACE/repo" config --get-all http.https://github.com/.extraheader)"
+          git -c http.https://github.com/.extraheader="$auth" push --force \
+            "https://github.com/$GITHUB_REPOSITORY" badges:badges
