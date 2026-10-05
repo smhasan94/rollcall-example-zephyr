@@ -86,9 +86,11 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: repo
+          persist-credentials: false
       - name: Write the badge JSON to the badges branch
         env:
           SCORE: ${{ needs.sbom.outputs.score }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/badges"
@@ -104,7 +106,8 @@ jobs:
           git -c user.name="github-actions[bot]" \
             -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
             commit -qm "Readiness badge: $SCORE/100 (${GITHUB_SHA::12})"
-          # The checkout's credentials, for this repository only.
-          auth="$(git -C "$GITHUB_WORKSPACE/repo" config --get-all http.https://github.com/.extraheader)"
+          # The job's token, from the environment, for this one push (never written to disk).
+          auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$auth"
           git -c http.https://github.com/.extraheader="$auth" push --force \
             "https://github.com/$GITHUB_REPOSITORY" badges:badges
